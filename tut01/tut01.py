@@ -39,6 +39,11 @@ def make_stats_table(groups_folder):
     if stats:
         stats_df = pd.DataFrame(stats).T.fillna(0).astype(int)
         stats_df.index.name = "Group"
+
+        # --- Fix: Move 'Total' column to the end ---
+        if "Total" in stats_df.columns:
+            cols = [c for c in stats_df.columns if c != "Total"] + ["Total"]
+            stats_df = stats_df[cols]
     else:
         stats_df = pd.DataFrame()
     return stats_df
