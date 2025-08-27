@@ -1,35 +1,23 @@
 import streamlit as st
 import pandas as pd
 import os
+import shutil
+import math
 import re
-from io import BytesIO
 import zipfile
-from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill
-
-# ==========================
-# Utility Functions
-# ==========================
-
-def make_output_folders():
-    """Ensure output folders exist."""
-    os.makedirs("output/branchwise", exist_ok=True)
-    os.makedirs("output/uniform", exist_ok=True)
+import io
 
 
-def save_groups(groups_dict, group_type):
-    """Save group CSVs into output/<group_type> folder."""
-    folder = os.path.join("output", group_type)
-    os.makedirs(folder, exist_ok=True)
-
-    for gname, df in groups_dict.items():
-        df.to_csv(os.path.join(folder, f"{gname}.csv"), index=False)
-
-    return folder
+# ------------------ Utility Functions ------------------ #
+def reset_output_folder(folder_path):
+    """Delete and recreate a folder."""
+    if os.path.exists(folder_path):
+        shutil.rmtree(folder_path)
+    os.makedirs(folder_path)
 
 
 def make_stats_table(groups_folder):
-    """Generate department count statistics with 'Total' at the end."""
+    """Generate department count statistics from CSV group files."""
     group_files = sorted(
         [f for f in os.listdir(groups_folder) if f.endswith(".csv")],
         key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 9999
@@ -51,30 +39,107 @@ def make_stats_table(groups_folder):
     if stats:
         stats_df = pd.DataFrame(stats).T.fillna(0).astype(int)
         stats_df.index.name = "Group"
-
-        # 🔥 Move "Total" to the end
-        if "Total" in stats_df.columns:
-            cols = [c for c in stats_df.columns if c != "Total"] + ["Total"]
-            stats_df = stats_df[cols]
     else:
         stats_df = pd.DataFrame()
-
     return stats_df
 
 
+def zip_multiple_folders_and_file(folder_map, zip_name="all_groups.zip"):
+    """Zip multiple folders and files into one archive."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for subfolder_name, folder_path in folder_map.items():
+            for root, _, files in os.walk(folder_path):
+                for file in files:
+                    filepath = os.path.join(root, file)
+                    arcname = os.path.join(
+                        subfolder_name,
+                        os.path.relpath(filepath, folder_path)
+                    )
+                    zipf.write(filepath, arcname)
+    buffer.seek(0)
+    return buffer
+
+
+# ------------------ Core Actions ------------------ #
+def load_excel(uploaded_file):
+    """Load uploaded Excel and keep only required columns."""
+    df = pd.read_excel(uploaded_file)
+    df = df.iloc[:, :3]  # Roll, Name, Email
+    required_cols = ["Roll", "Name", "Email"]
+    df.columns = required_cols
+    df['Department'] = df["Roll"].str.extract(r'([A-Z]+)')
+    return df, required_cols
+
+
+def create_full_branchwise_files(df, required_cols):
+    """Create full department-wise CSVs inside output folder."""
+    folder = os.path.join("output", "full_branchwise")
+    reset_output_folder(folder)
+    for dept, group in df.groupby("Department"):
+        filename = os.path.join(folder, f"{dept}.csv")
+        group[required_cols].to_csv(filename, index=False)
+    return folder
+
+
+def branchwise_grouping(departments, k, required_cols):
+    """Round-robin branchwise grouping inside output folder."""
+    groups = [[] for _ in range(k)]
+    row, group_index = 0, 0
+    while True:
+        added_any = False
+        for dept, df_dept in departments.items():
+            if row < len(df_dept):
+                student = df_dept.iloc[row].to_dict()
+                groups[group_index].append(student)
+                added_any = True
+        row += 1
+        group_index = (group_index + 1) % k
+        if not added_any:
+            break
+
+    folder = os.path.join("output", "group_branch_wise_mix")
+    reset_output_folder(folder)
+    for i, group in enumerate(groups, start=1):
+        pd.DataFrame(group).to_csv(os.path.join(folder, f"g{i}.csv"), index=False)
+    return folder
+
+
+def uniform_grouping(departments, k, required_cols):
+    """Distribute students uniformly across groups inside output folder."""
+    total_students = sum(len(df) for df in departments.values())
+    target_size = math.ceil(total_students / k)
+
+    groups = [[] for _ in range(k)]
+    group_sizes = [0] * k
+    dept_remaining = {d: df.copy() for d, df in departments.items()}
+
+    g = 0
+    while any(len(df) > 0 for df in dept_remaining.values()):
+        dept = max(dept_remaining, key=lambda d: len(dept_remaining[d]))
+        df_dept = dept_remaining[dept]
+        if len(df_dept) == 0:
+            continue
+        space_left = target_size - group_sizes[g]
+        take = min(space_left, len(df_dept))
+        students = df_dept.iloc[:take].to_dict(orient="records")
+        groups[g].extend(students)
+        group_sizes[g] += take
+        dept_remaining[dept] = df_dept.iloc[take:].reset_index(drop=True)
+        if group_sizes[g] >= target_size:
+            g = (g + 1) % k
+
+    folder = os.path.join("output", "group_uniform_mix")
+    reset_output_folder(folder)
+    for i, group in enumerate(groups, start=1):
+        pd.DataFrame(group).to_csv(os.path.join(folder, f"g{i}.csv"), index=False)
+    return folder
+
+
 def save_statistics(branchwise_folder, uniform_folder):
-    """Save stats to Excel with 'Total' at the end and highlighted."""
+    """Save stats to Excel inside output folder."""
     branchwise_stats = make_stats_table(branchwise_folder)
     uniform_stats = make_stats_table(uniform_folder)
-
-    def reorder_total(df):
-        if not df.empty and "Total" in df.columns:
-            cols = [c for c in df.columns if c != "Total"] + ["Total"]
-            return df[cols]
-        return df
-
-    branchwise_stats = reorder_total(branchwise_stats)
-    uniform_stats = reorder_total(uniform_stats)
 
     output_file = os.path.join("output", "output.xlsx")
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
@@ -93,95 +158,74 @@ def save_statistics(branchwise_folder, uniform_folder):
             start_row += 2
             uniform_stats.to_excel(writer, sheet_name="Statistics", startrow=start_row)
 
-    # 🔥 Highlight "Total" column
-    wb = load_workbook(output_file)
-    ws = wb["Statistics"]
-    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
-    bold_font = Font(bold=True)
-
-    for col in ws.iter_cols(min_row=1, max_row=ws.max_row):
-        if col[0].value == "Total":  # column header
-            for cell in col:
-                cell.font = bold_font
-                cell.fill = yellow_fill
-    wb.save(output_file)
-
     return branchwise_stats, uniform_stats, output_file
 
 
-def create_zip():
-    """Create a ZIP of output folder for download."""
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk("output"):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zf.write(file_path, os.path.relpath(file_path, "output"))
-    zip_buffer.seek(0)
-    return zip_buffer
+# ------------------ Streamlit UI ------------------ #
+st.title("🎯 Student Group Maker")
 
+uploaded_file = st.file_uploader("Upload input_Make Groups.xlsx", type=["xlsx"])
+k_branchwise = st.number_input("Number of groups for Branchwise Mix", min_value=1, value=3)
+k_uniform = st.number_input("Number of groups for Uniform Mix", min_value=1, value=3)
 
-# ==========================
-# Streamlit App
-# ==========================
-
-st.set_page_config(page_title="Student Group Generator", layout="wide")
-
-st.title("📊 Student Group Generator")
-
-uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
-
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-    st.write("### Preview of Uploaded Data")
-    st.dataframe(df.head())
-
-    if "Roll" not in df.columns:
-        st.error("Excel must contain a 'Roll' column.")
+if st.button("Run Grouping"):
+    if uploaded_file is None:
+        st.error("Please upload an Excel file first!")
     else:
-        # Just for demo: split into groups of 5
-        groups_branchwise = {
-            f"Group_{i+1}": df.iloc[i:i+5] for i in range(0, len(df), 5)
-        }
-        groups_uniform = {
-            f"Uniform_{i+1}": df.sample(min(5, len(df))) for i in range(len(groups_branchwise))
-        }
+        # Reset master output folder
+        reset_output_folder("output")
 
-        # Save groups
-        make_output_folders()
-        branchwise_folder = save_groups(groups_branchwise, "branchwise")
-        uniform_folder = save_groups(groups_uniform, "uniform")
+        # Step 1: Load Excel
+        df, required_cols = load_excel(uploaded_file)
 
-        # Save statistics
-        branchwise_stats, uniform_stats, excel_file = save_statistics(branchwise_folder, uniform_folder)
+        # Step 2: Create full branchwise files
+        branch_folder = create_full_branchwise_files(df, required_cols)
 
-        # Show tables
-        st.subheader("📌 Branchwise Mix Statistics")
-        if not branchwise_stats.empty:
-            st.dataframe(branchwise_stats)
-        else:
-            st.info("No branchwise statistics available.")
+        # Step 3: Load departments back
+        departments = {}
+        for file in sorted(os.listdir(branch_folder)):
+            if file.endswith(".csv"):
+                dept = file.replace(".csv", "")
+                df_dept = pd.read_csv(os.path.join(branch_folder, file))
+                df_dept = df_dept[required_cols].dropna(subset=["Roll"])
+                departments[dept] = df_dept.reset_index(drop=True)
 
-        st.subheader("📌 Uniform Mix Statistics")
-        if not uniform_stats.empty:
-            st.dataframe(uniform_stats)
-        else:
-            st.info("No uniform statistics available.")
+        # Step 4: Create Branchwise Groups
+        branchwise_folder = branchwise_grouping(departments, k_branchwise, required_cols)
 
-        # Download section
-        st.subheader("⬇️ Download Results")
-        zip_buffer = create_zip()
+        # Step 5: Create Uniform Groups
+        uniform_folder = uniform_grouping(departments, k_uniform, required_cols)
+
+        # Step 6: Save statistics to Excel inside output/
+        branchwise_stats, uniform_stats, output_file = save_statistics(branchwise_folder, uniform_folder)
+
+        # Step 7: Show results
+        st.success("✅ Groups created successfully!")
+        st.write("### 📊 Branchwise Stats")
+        st.dataframe(branchwise_stats)
+        st.write("### 📊 Uniform Stats")
+        st.dataframe(uniform_stats)
+
+        # Step 8: Previews
+        for label, folder in {
+            "Branchwise Groups": branchwise_folder,
+            "Uniform Groups": uniform_folder,
+            "Full Branchwise Department Files": branch_folder
+        }.items():
+            st.write(f"### 📂 Preview {label}")
+            for file in sorted(os.listdir(folder), key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 9999):
+                with st.expander(f"🔍 Preview {file}"):
+                    df_preview = pd.read_csv(os.path.join(folder, file)).head(20)
+                    st.dataframe(df_preview)
+
+        # Step 9: Download buttons
+        with open(output_file, "rb") as f:
+            st.download_button("⬇️ Download Output Excel", f, file_name="output.xlsx")
+
+        all_zip = zip_multiple_folders_and_file({"output": "output"})
         st.download_button(
-            label="Download All Outputs (ZIP)",
-            data=zip_buffer,
-            file_name="output.zip",
+            "⬇️ Download All (Groups + Stats Excel)",
+            all_zip,
+            file_name="all_groups.zip",
             mime="application/zip"
         )
-
-        with open(excel_file, "rb") as f:
-            st.download_button(
-                label="Download Statistics Excel",
-                data=f,
-                file_name="output.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
