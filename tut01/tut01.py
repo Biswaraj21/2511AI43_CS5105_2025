@@ -4,6 +4,8 @@ import os
 import re
 from io import BytesIO
 import zipfile
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill
 
 # ==========================
 # Utility Functions
@@ -61,11 +63,10 @@ def make_stats_table(groups_folder):
 
 
 def save_statistics(branchwise_folder, uniform_folder):
-    """Save stats to Excel with 'Total' at the end."""
+    """Save stats to Excel with 'Total' at the end and highlighted."""
     branchwise_stats = make_stats_table(branchwise_folder)
     uniform_stats = make_stats_table(uniform_folder)
 
-    # 🔥 Ensure Total is last column
     def reorder_total(df):
         if not df.empty and "Total" in df.columns:
             cols = [c for c in df.columns if c != "Total"] + ["Total"]
@@ -92,6 +93,19 @@ def save_statistics(branchwise_folder, uniform_folder):
             start_row += 2
             uniform_stats.to_excel(writer, sheet_name="Statistics", startrow=start_row)
 
+    # 🔥 Highlight "Total" column
+    wb = load_workbook(output_file)
+    ws = wb["Statistics"]
+    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
+    bold_font = Font(bold=True)
+
+    for col in ws.iter_cols(min_row=1, max_row=ws.max_row):
+        if col[0].value == "Total":  # column header
+            for cell in col:
+                cell.font = bold_font
+                cell.fill = yellow_fill
+    wb.save(output_file)
+
     return branchwise_stats, uniform_stats, output_file
 
 
@@ -115,15 +129,15 @@ st.set_page_config(page_title="Student Group Generator", layout="wide")
 
 st.title("📊 Student Group Generator")
 
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    df = pd.read_excel(uploaded_file)
     st.write("### Preview of Uploaded Data")
     st.dataframe(df.head())
 
     if "Roll" not in df.columns:
-        st.error("CSV must contain a 'Roll' column.")
+        st.error("Excel must contain a 'Roll' column.")
     else:
         # Just for demo: split into groups of 5
         groups_branchwise = {
