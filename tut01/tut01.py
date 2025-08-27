@@ -44,8 +44,8 @@ def make_stats_table(groups_folder):
     return stats_df
 
 
-def zip_multiple_folders_and_file(folder_map, extra_file=None, zip_name="all_groups.zip"):
-    """Zip multiple folders and an extra file into one archive."""
+def zip_multiple_folders_and_file(folder_map, zip_name="all_groups.zip"):
+    """Zip multiple folders and files into one archive."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         for subfolder_name, folder_path in folder_map.items():
@@ -57,9 +57,6 @@ def zip_multiple_folders_and_file(folder_map, extra_file=None, zip_name="all_gro
                         os.path.relpath(filepath, folder_path)
                     )
                     zipf.write(filepath, arcname)
-
-        if extra_file and os.path.exists(extra_file):
-            zipf.write(extra_file, os.path.basename(extra_file))
     buffer.seek(0)
     return buffer
 
@@ -76,8 +73,8 @@ def load_excel(uploaded_file):
 
 
 def create_full_branchwise_files(df, required_cols):
-    """Create full department-wise CSVs."""
-    folder = "full_branchwise"
+    """Create full department-wise CSVs inside output folder."""
+    folder = os.path.join("output", "full_branchwise")
     reset_output_folder(folder)
     for dept, group in df.groupby("Department"):
         filename = os.path.join(folder, f"{dept}.csv")
@@ -86,7 +83,7 @@ def create_full_branchwise_files(df, required_cols):
 
 
 def branchwise_grouping(departments, k, required_cols):
-    """Round-robin branchwise grouping."""
+    """Round-robin branchwise grouping inside output folder."""
     groups = [[] for _ in range(k)]
     row, group_index = 0, 0
     while True:
@@ -101,7 +98,7 @@ def branchwise_grouping(departments, k, required_cols):
         if not added_any:
             break
 
-    folder = "group_branch_wise_mix"
+    folder = os.path.join("output", "group_branch_wise_mix")
     reset_output_folder(folder)
     for i, group in enumerate(groups, start=1):
         pd.DataFrame(group).to_csv(os.path.join(folder, f"g{i}.csv"), index=False)
@@ -109,7 +106,7 @@ def branchwise_grouping(departments, k, required_cols):
 
 
 def uniform_grouping(departments, k, required_cols):
-    """Distribute students uniformly across groups."""
+    """Distribute students uniformly across groups inside output folder."""
     total_students = sum(len(df) for df in departments.values())
     target_size = math.ceil(total_students / k)
 
@@ -132,18 +129,19 @@ def uniform_grouping(departments, k, required_cols):
         if group_sizes[g] >= target_size:
             g = (g + 1) % k
 
-    folder = "group_uniform_mix"
+    folder = os.path.join("output", "group_uniform_mix")
     reset_output_folder(folder)
     for i, group in enumerate(groups, start=1):
         pd.DataFrame(group).to_csv(os.path.join(folder, f"g{i}.csv"), index=False)
     return folder
 
 
-def save_statistics(branchwise_folder, uniform_folder, output_file="output.xlsx"):
-    """Save stats to Excel."""
+def save_statistics(branchwise_folder, uniform_folder):
+    """Save stats to Excel inside output folder."""
     branchwise_stats = make_stats_table(branchwise_folder)
     uniform_stats = make_stats_table(uniform_folder)
 
+    output_file = os.path.join("output", "output.xlsx")
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         start_row = 0
         if not branchwise_stats.empty:
@@ -174,6 +172,9 @@ if st.button("Run Grouping"):
     if uploaded_file is None:
         st.error("Please upload an Excel file first!")
     else:
+        # Reset master output folder
+        reset_output_folder("output")
+
         # Step 1: Load Excel
         df, required_cols = load_excel(uploaded_file)
 
@@ -195,7 +196,7 @@ if st.button("Run Grouping"):
         # Step 5: Create Uniform Groups
         uniform_folder = uniform_grouping(departments, k_uniform, required_cols)
 
-        # Step 6: Save statistics to Excel
+        # Step 6: Save statistics to Excel inside output/
         branchwise_stats, uniform_stats, output_file = save_statistics(branchwise_folder, uniform_folder)
 
         # Step 7: Show results
@@ -221,12 +222,7 @@ if st.button("Run Grouping"):
         with open(output_file, "rb") as f:
             st.download_button("⬇️ Download Output Excel", f, file_name="output.xlsx")
 
-        all_zip = zip_multiple_folders_and_file(
-            {"full_branchwise": branch_folder,
-             "group_branch_wise_mix": branchwise_folder,
-             "group_uniform_mix": uniform_folder},
-            extra_file=output_file
-        )
+        all_zip = zip_multiple_folders_and_file({"output": "output"})
         st.download_button(
             "⬇️ Download All (Groups + Stats Excel)",
             all_zip,
