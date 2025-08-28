@@ -88,26 +88,45 @@ def create_full_branchwise_files(df, required_cols):
 
 
 def branchwise_grouping(departments, k, required_cols):
-    """Round-robin branchwise grouping inside output folder."""
+    """
+    Branchwise grouping: fill one group up to target size before moving
+    to the next group. Saves CSVs inside output/group_branch_wise_mix.
+    """
     groups = [[] for _ in range(k)]
-    row, group_index = 0, 0
+    group_index = 0
+    row = 0
+
+    # Calculate target size per group (as even as possible)
+    total_students = sum(len(df) for df in departments.values())
+    base_size = total_students // k
+    remainder = total_students % k
+    target_sizes = [base_size + (1 if i < remainder else 0) for i in range(k)]
+
     while True:
         added_any = False
         for dept, df_dept in departments.items():
-            if row < len(df_dept):
-                student = df_dept.iloc[row].to_dict()
-                groups[group_index].append(student)
-                added_any = True
+            if row < len(df_dept):  # still students left in this dept
+                if len(groups[group_index]) < target_sizes[group_index]:
+                    student = df_dept.iloc[row].to_dict()
+                    groups[group_index].append(student)
+                    added_any = True
+
+                    # ✅ If this group reaches target size, move to next
+                    if len(groups[group_index]) >= target_sizes[group_index]:
+                        group_index = min(group_index + 1, k - 1)
         row += 1
-        group_index = (group_index + 1) % k
         if not added_any:
             break
 
+    # Save results
     folder = os.path.join("output", "group_branch_wise_mix")
     reset_output_folder(folder)
     for i, group in enumerate(groups, start=1):
-        pd.DataFrame(group).to_csv(os.path.join(folder, f"g{i}.csv"), index=False)
+        pd.DataFrame(group)[required_cols].to_csv(
+            os.path.join(folder, f"g{i}.csv"), index=False
+        )
     return folder
+
 
 
 def uniform_grouping(departments, k, required_cols):
