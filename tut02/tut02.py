@@ -1,11 +1,10 @@
-# app.py
+
 import streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="BTP/MTP Allocation (fixed)", layout="wide")
 st.title("BTP / MTP Allocation (fixed)")
 
-# Upload CSV
 uploaded = st.file_uploader(
     "Upload input CSV (Roll,Name,Email,CGPA,<Faculty columns with numeric ranks>)", 
     type=["csv"]
@@ -18,28 +17,24 @@ df = pd.read_csv(uploaded)
 st.subheader("Input preview")
 st.dataframe(df.head(20))
 
-# Validate first four columns
 expected_prefix = ["Roll", "Name", "Email", "CGPA"]
 if len(df.columns) < 5 or list(df.columns[:4]) != expected_prefix:
     st.error(f"Expected first four columns: {expected_prefix}. Found: {list(df.columns[:4])}")
     st.stop()
 
-# Faculty columns (each column is a faculty; cell values = numeric rank: 1 best)
 faculties = list(df.columns[4:])
 n_faculties = len(faculties)
 st.write(f"Detected {n_faculties} faculty columns (each column is a faculty).")
 
-# Ensure CGPA numeric and sort descending
+
 df['CGPA'] = pd.to_numeric(df['CGPA'], errors='coerce').fillna(-1)
 df_sorted = df.sort_values(by='CGPA', ascending=False).reset_index(drop=True)
 
-# Convert faculty rank columns to numeric
 for f in faculties:
     df_sorted[f] = pd.to_numeric(df_sorted[f], errors='coerce')
 
 students = df_sorted.to_dict('records')
 
-# Helper: choose best available faculty for a student
 def choose_best_faculty(stu_record, available_set):
     cand = []
     for fac in available_set:
@@ -56,7 +51,6 @@ def choose_best_faculty(stu_record, available_set):
     fallback = sorted([fac for fac, _ in cand])[0]
     return fallback, None
 
-# Process in batches
 batches = [students[i:i + n_faculties] for i in range(0, len(students), n_faculties)]
 
 alloc_rows = []
@@ -85,18 +79,15 @@ for batch_idx, batch in enumerate(batches, start=1):
         else:
             unranked_count[allocated_fac] += 1
 
-# Build full allocation DataFrame
+
 alloc_df = pd.DataFrame(alloc_rows)
 
-# Build minimal allocation DataFrame (for preview and download)
 alloc_min_df = alloc_df[["Roll", "Name", "Email", "CGPA", "Allocated_Faculty"]].copy()
 alloc_min_df.rename(columns={"Allocated_Faculty": "Allocated"}, inplace=True)
 
-# Show minimal allocation preview
 st.subheader("Allocation preview (first 200 rows, minimal)")
 st.dataframe(alloc_min_df.head(200))
 
-# Faculty preference statistics
 fac_pref_rows = []
 for fac in faculties:
     row = {"Faculty": fac}
@@ -110,11 +101,10 @@ fac_pref_df = pd.DataFrame(fac_pref_rows)
 st.subheader("Faculty preference statistics")
 st.dataframe(fac_pref_df)
 
-# Helper to convert DataFrame to CSV bytes
 def df_to_csv_bytes(df_in):
     return df_in.to_csv(index=False).encode('utf-8')
 
-# Download buttons
+
 st.download_button(
     "Download minimal allocation CSV", 
     data=df_to_csv_bytes(alloc_min_df),
