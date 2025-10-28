@@ -119,3 +119,10 @@ st.download_button(
 )
 
 st.success("Done. Allocation done batch-wise with correct lowest-rank (1 is best) selection per student.")
+
+if __name__ == "__main__":
+    import os
+    # This ensures the app runs correctly inside Docker
+    port = int(os.environ.get("PORT", 8501))
+    st.write(f"App is running on port {port}")
+    st.write("Access this app via http://localhost:8501 in your browser.")
