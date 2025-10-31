@@ -1,40 +1,62 @@
-
 import streamlit as st
 import pandas as pd
+import logging
+import os
 
-st.set_page_config(page_title="BTP/MTP Allocation (fixed)", layout="wide")
-st.title("BTP / MTP Allocation (fixed)")
+# Setup logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app_log.txt', mode='w')
+    ]
+)
+logger = logging.getLogger()
+
+st.set_page_config(page_title="BTP/MTP Allocation", layout="wide")
+st.title("BTP / MTP Allocation ")
+
+# Log the start of the application
+logger.info("App started.")
 
 uploaded = st.file_uploader(
-    "Upload input CSV (Roll,Name,Email,CGPA,<Faculty columns with numeric ranks>)", 
+    "Upload input CSV (Roll, Name, Email, CGPA, <Faculty columns with numeric ranks>)", 
     type=["csv"]
 )
 if uploaded is None:
     st.info("Please upload an input CSV to proceed.")
+    logger.warning("No CSV uploaded.")
     st.stop()
 
 df = pd.read_csv(uploaded)
 st.subheader("Input preview")
 st.dataframe(df.head(20))
 
+# Check for the required columns
 expected_prefix = ["Roll", "Name", "Email", "CGPA"]
 if len(df.columns) < 5 or list(df.columns[:4]) != expected_prefix:
-    st.error(f"Expected first four columns: {expected_prefix}. Found: {list(df.columns[:4])}")
+    error_msg = f"Expected first four columns: {expected_prefix}. Found: {list(df.columns[:4])}"
+    st.error(error_msg)
+    logger.error(error_msg)
     st.stop()
 
 faculties = list(df.columns[4:])
 n_faculties = len(faculties)
-st.write(f"Detected {n_faculties} faculty columns (each column is a faculty).")
-
+logger.info(f"Detected {n_faculties} faculty columns: {faculties}")
 
 df['CGPA'] = pd.to_numeric(df['CGPA'], errors='coerce').fillna(-1)
 df_sorted = df.sort_values(by='CGPA', ascending=False).reset_index(drop=True)
+
+# Log the sorting operation
+logger.debug("Sorted dataframe by CGPA.")
 
 for f in faculties:
     df_sorted[f] = pd.to_numeric(df_sorted[f], errors='coerce')
 
 students = df_sorted.to_dict('records')
 
+# Function to choose the best faculty for each student
 def choose_best_faculty(stu_record, available_set):
     cand = []
     for fac in available_set:
@@ -58,6 +80,9 @@ pref_count = {fac: {rank: 0 for rank in range(1, n_faculties + 1)} for fac in fa
 pref_count_total = {fac: 0 for fac in faculties}
 unranked_count = {fac: 0 for fac in faculties}
 
+# Log batch processing
+logger.info(f"Started processing {len(batches)} batches.")
+
 for batch_idx, batch in enumerate(batches, start=1):
     available = set(faculties)
     for stu in batch:
@@ -79,6 +104,7 @@ for batch_idx, batch in enumerate(batches, start=1):
         else:
             unranked_count[allocated_fac] += 1
 
+logger.info(f"Finished processing {len(alloc_rows)} student allocations.")
 
 alloc_df = pd.DataFrame(alloc_rows)
 
@@ -104,6 +130,8 @@ st.dataframe(fac_pref_df)
 def df_to_csv_bytes(df_in):
     return df_in.to_csv(index=False).encode('utf-8')
 
+# Log download button click
+logger.info("Preparing download buttons.")
 
 st.download_button(
     "Download minimal allocation CSV", 
@@ -120,9 +148,11 @@ st.download_button(
 
 st.success("Done. Allocation done batch-wise with correct lowest-rank (1 is best) selection per student.")
 
+# Log app status
 if __name__ == "__main__":
-    import os
-    # This ensures the app runs correctly inside Docker
     port = int(os.environ.get("PORT", 8501))
+    logger.info(f"App is running on port {port}")
     st.write(f"App is running on port {port}")
     st.write("Access this app via http://localhost:8501 in your browser.")
+    logger.info("App is accessible at http://localhost:8501.")
+
