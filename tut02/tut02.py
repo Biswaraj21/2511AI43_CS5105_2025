@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="BTP/MTP Allocation (fixed)", layout="wide")
+st.set_page_config(page_title="BTP/MTP Allocation", layout="wide")
 st.title("BTP / MTP Allocation (fixed)")
 
 uploaded = st.file_uploader(
