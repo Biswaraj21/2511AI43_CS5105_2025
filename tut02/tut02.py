@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="BTP/MTP Allocation", layout="wide")
-st.title("BTP / MTP Allocation (fixed)")
+st.title("BTP / MTP Allocation ")
 
 uploaded = st.file_uploader(
     "Upload input CSV (Roll,Name,Email,CGPA,<Faculty columns with numeric ranks>)", 
